@@ -11,6 +11,18 @@ export interface Article {
 
 const GNEWS_KEY = "64a8a7d4bc18d12474a1dd86d3f83d92";
 
+function getFallbackImage(category: "space" | "tech", title: string): string {
+  const hash = title.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const seed = (hash % 1000) + 1;
+  return `https://picsum.photos/seed/${seed}/400/250`;
+}
+
+const BLOCKED_KEYWORDS = [
+  "drowns", "murder", "flood", "police", "arrest",
+  "election", "killed", "hospital", "celebrity",
+  "actor", "actress", "wedding", "stabbing", "robbery",
+];
+
 export async function fetchSpaceNews(
   search?: string,
   limit = 20,
@@ -33,7 +45,7 @@ export async function fetchSpaceNews(
     id: `space-${item.id}`,
     title: item.title,
     summary: item.summary || "",
-    imageUrl: item.image_url || null,
+    imageUrl: item.image_url || getFallbackImage("space", item.title),
     url: item.url,
     source: item.news_site || "Spaceflight News",
     publishedAt: item.published_at,
@@ -48,9 +60,10 @@ export async function fetchTechNews(
   limit = 10,
   page = 1
 ): Promise<{ articles: Article[]; hasMore: boolean }> {
-  const query = search || "AI OR software OR hardware OR cybersecurity OR smartphone OR startup OR programming OR cloud OR machine learning";
+  const query = search
+    ? `${search} technology`
+    : `AI OR software OR cybersecurity OR smartphone OR semiconductor OR startup OR "machine learning" OR cryptocurrency OR programming`;
 
-  // GNews free plan: max 10 por req — faz 2 chamadas paralelas com páginas diferentes
   const fetchPage = async (p: number) => {
     const params = new URLSearchParams({
       lang: "en",
@@ -58,6 +71,7 @@ export async function fetchTechNews(
       page: String(p),
       apikey: GNEWS_KEY,
       q: query,
+      in: "title",
     });
     const res = await fetch(`https://gnews.io/api/v4/search?${params}`);
     if (!res.ok) return [];
@@ -65,7 +79,6 @@ export async function fetchTechNews(
     return data.articles || [];
   };
 
-  // Busca página atual e a próxima em paralelo
   const [batch1, batch2] = await Promise.all([
     fetchPage(page * 2 - 1),
     fetchPage(page * 2),
@@ -73,18 +86,22 @@ export async function fetchTechNews(
 
   const results = [...batch1, ...batch2];
 
-  const articles: Article[] = results.map((item: any, i: number) => ({
+  const filtered = results.filter((item: any) => {
+    const title = (item.title || "").toLowerCase();
+    return !BLOCKED_KEYWORDS.some(kw => title.includes(kw));
+  });
+
+  const articles: Article[] = filtered.map((item: any, i: number) => ({
     id: `tech-${page}-${i}-${item.publishedAt}`,
     title: item.title,
     summary: item.description || "",
-    imageUrl: item.image || null,
+    imageUrl: item.image || getFallbackImage("tech", item.title),
     url: item.url,
     source: item.source?.name || "Tech News",
     publishedAt: item.publishedAt,
     category: "tech" as const,
   }));
 
-  // Remove duplicatas por URL
   const seen = new Set<string>();
   const unique = articles.filter(a => {
     if (seen.has(a.url)) return false;
@@ -92,7 +109,7 @@ export async function fetchTechNews(
     return true;
   });
 
-  return { articles: unique, hasMore: unique.length >= 18 };
+  return { articles: unique, hasMore: unique.length >= 10 };
 }
 
 export interface FetchResult {
