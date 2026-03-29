@@ -31,5 +31,5 @@
   },
   "include": [
     "src"
-  ]
+, "api/gnews.ts"  ]
 }

@@ -64,20 +64,25 @@ export async function fetchTechNews(
     ? `${search} technology`
     : `AI OR software OR cybersecurity OR smartphone OR semiconductor OR startup OR "machine learning" OR cryptocurrency OR programming`;
 
-  const fetchPage = async (p: number) => {
-    const params = new URLSearchParams({
-      lang: "en",
-      max: "10",
-      page: String(p),
-      apikey: GNEWS_KEY,
-      q: query,
-      in: "title",
-    });
-    const res = await fetch(`https://gnews.io/api/v4/search?${params}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.articles || [];
-  };
+const fetchPage = async (p: number) => {
+  const params = new URLSearchParams({
+    lang: "en",
+    max: "10",
+    page: String(p),
+    q: query,
+    in: "title",
+  });
+
+
+  const baseUrl = import.meta.env.DEV
+    ? `https://gnews.io/api/v4/search?${params}&apikey=${GNEWS_KEY}`
+    : `/api/gnews?${params}`;
+
+  const res = await fetch(baseUrl);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.articles || [];
+};
 
   const [batch1, batch2] = await Promise.all([
     fetchPage(page * 2 - 1),
