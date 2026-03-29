@@ -9,15 +9,23 @@ export interface Article {
   category: "space" | "tech";
 }
 
-const APITUBE_KEY = "api_live_cFmqMNkf6jl923Jf8X4SzikdZVuOGLYllAHOrNOefHOfPHZmx";
-const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+const GNEWS_KEY = "64a8a7d4bc18d12474a1dd86d3f83d92";
 
-// Spaceflight News API (free, no key) — supports offset pagination
-export async function fetchSpaceNews(search?: string, limit = 20, offset = 0): Promise<{ articles: Article[]; hasMore: boolean }> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset), ordering: "-published_at" });
+export async function fetchSpaceNews(
+  search?: string,
+  limit = 20,
+  offset = 0
+): Promise<{ articles: Article[]; hasMore: boolean }> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    ordering: "-published_at",
+  });
   if (search) params.set("search", search);
 
-  const res = await fetch(`https://api.spaceflightnewsapi.net/v4/articles/?${params}`);
+  const res = await fetch(
+    `https://api.spaceflightnewsapi.net/v4/articles/?${params}`
+  );
   if (!res.ok) throw new Error("Failed to fetch space news");
   const data = await res.json();
 
@@ -35,46 +43,56 @@ export async function fetchSpaceNews(search?: string, limit = 20, offset = 0): P
   return { articles, hasMore: !!data.next };
 }
 
-// APITube Tech News — uses CORS proxy for browser access
-export async function fetchTechNews(search?: string, limit = 20, page = 1): Promise<{ articles: Article[]; hasMore: boolean }> {
-  const params = new URLSearchParams({
-    "topic.id": "industry.technology_news",
-    per_page: String(limit),
-    page: String(page),
-    language: "en",
-  });
-  if (search) params.set("q", search);
+export async function fetchTechNews(
+  search?: string,
+  limit = 10,
+  page = 1
+): Promise<{ articles: Article[]; hasMore: boolean }> {
+  const query = search || "AI OR software OR hardware OR cybersecurity OR smartphone OR startup OR programming OR cloud OR machine learning";
 
-  const targetUrl = `https://api.apitube.io/v1/news/everything?${params}`;
-  
-  // Try direct first, fall back to CORS proxy
-  let res: Response;
-  try {
-    res = await fetch(targetUrl, {
-      headers: { "X-API-Key": APITUBE_KEY },
+  // GNews free plan: max 10 por req — faz 2 chamadas paralelas com páginas diferentes
+  const fetchPage = async (p: number) => {
+    const params = new URLSearchParams({
+      lang: "en",
+      max: "10",
+      page: String(p),
+      apikey: GNEWS_KEY,
+      q: query,
     });
-  } catch {
-    // CORS blocked — use proxy (key goes in query param since we can't set headers through proxy)
-    const proxyUrl = `${CORS_PROXY}${encodeURIComponent(`${targetUrl}&api_key=${APITUBE_KEY}`)}`;
-    res = await fetch(proxyUrl);
-  }
+    const res = await fetch(`https://gnews.io/api/v4/search?${params}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.articles || [];
+  };
 
-  if (!res.ok) throw new Error("Failed to fetch tech news");
-  const data = await res.json();
+  // Busca página atual e a próxima em paralelo
+  const [batch1, batch2] = await Promise.all([
+    fetchPage(page * 2 - 1),
+    fetchPage(page * 2),
+  ]);
 
-  const results = data.results || data.articles || [];
+  const results = [...batch1, ...batch2];
+
   const articles: Article[] = results.map((item: any, i: number) => ({
-    id: `tech-${item.id || `${page}-${i}`}`,
+    id: `tech-${page}-${i}-${item.publishedAt}`,
     title: item.title,
-    summary: item.description || item.body?.substring(0, 200) || "",
+    summary: item.description || "",
     imageUrl: item.image || null,
-    url: item.href || item.url || "",
-    source: item.source?.name || item.source?.domain || "Tech News",
-    publishedAt: item.published_at || new Date().toISOString(),
+    url: item.url,
+    source: item.source?.name || "Tech News",
+    publishedAt: item.publishedAt,
     category: "tech" as const,
   }));
 
-  return { articles, hasMore: articles.length >= limit };
+  // Remove duplicatas por URL
+  const seen = new Set<string>();
+  const unique = articles.filter(a => {
+    if (seen.has(a.url)) return false;
+    seen.add(a.url);
+    return true;
+  });
+
+  return { articles: unique, hasMore: unique.length >= 18 };
 }
 
 export interface FetchResult {
@@ -91,33 +109,41 @@ export async function fetchAllNews(
   limit = 20
 ): Promise<FetchResult> {
   let spaceResult = { articles: [] as Article[], hasMore: false };
-  let techResult = { articles: [] as Article[], hasMore: false };
+  let techResult  = { articles: [] as Article[], hasMore: false };
 
   const fetchers: Promise<void>[] = [];
 
   if (category === "all" || category === "space") {
     fetchers.push(
       fetchSpaceNews(search, limit, spaceOffset)
-        .then(r => { spaceResult = r; })
-        .catch(() => {})
+        .then(r  => { spaceResult = r; })
+        .catch(e => console.error("[Space]", e))
     );
   }
+
   if (category === "all" || category === "tech") {
     fetchers.push(
-      fetchTechNews(search, limit, techPage)
-        .then(r => { techResult = r; })
-        .catch(() => {})
+      fetchTechNews(search, 10, techPage)
+        .then(r  => { techResult = r; })
+        .catch(e => console.error("[GNews]", e))
     );
   }
 
   await Promise.all(fetchers);
 
-  const articles = [...spaceResult.articles, ...techResult.articles];
-  articles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+  let combined: Article[] = [];
+  if (category === "all")   combined = [...spaceResult.articles, ...techResult.articles];
+  if (category === "space") combined = spaceResult.articles;
+  if (category === "tech")  combined = techResult.articles;
+
+  combined.sort(
+    (a, b) =>
+      new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+  );
 
   return {
-    articles,
+    articles: combined,
     hasMoreSpace: spaceResult.hasMore,
-    hasMoreTech: techResult.hasMore,
+    hasMoreTech:  techResult.hasMore,
   };
 }

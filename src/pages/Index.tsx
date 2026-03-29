@@ -23,9 +23,28 @@ const Index = () => {
   const [hasMoreTech, setHasMoreTech] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // Initial load
+  // Ao trocar categoria, reseta tudo antes de buscar
+  const handleCategoryChange = (newCategory: Category) => {
+    setCategory(newCategory);
+    setArticles([]);
+    setSpaceOffset(0);
+    setTechPage(1);
+    setHasMoreSpace(true);
+    setHasMoreTech(true);
+  };
+
+  // Ao buscar, reseta paginação também
+  const handleSearch = (newSearch: string) => {
+    setSearch(newSearch);
+    setArticles([]);
+    setSpaceOffset(0);
+    setTechPage(1);
+    setHasMoreSpace(true);
+    setHasMoreTech(true);
+  };
+
   const { isLoading, isError } = useQuery<FetchResult>({
-    queryKey: ["news", category, search],
+    queryKey: ["news", category, search], // muda a key = nova busca
     queryFn: async () => {
       const result = await fetchAllNews(category, search || undefined, 0, 1, BATCH);
       setArticles(result.articles);
@@ -35,7 +54,8 @@ const Index = () => {
       setHasMoreTech(result.hasMoreTech);
       return result;
     },
-    staleTime: 1000 * 60 * 5,
+    staleTime: 0,        // ← sempre rebusca ao trocar categoria/search
+    refetchOnWindowFocus: false,
   });
 
   const hasMore =
@@ -58,7 +78,7 @@ const Index = () => {
         const newArticles = result.articles.filter(a => !existingIds.has(a.id));
         return [...prev, ...newArticles];
       });
-      if (category !== "tech") setSpaceOffset(prev => prev + BATCH);
+      if (category !== "tech")  setSpaceOffset(prev => prev + BATCH);
       if (category !== "space") setTechPage(prev => prev + 1);
       setHasMoreSpace(result.hasMoreSpace);
       setHasMoreTech(result.hasMoreTech);
@@ -84,8 +104,10 @@ const Index = () => {
         </section>
 
         <div className="flex flex-col sm:flex-row items-center gap-4 justify-between">
-          <CategoryFilter active={category} onChange={setCategory} />
-          <SearchBar onSearch={setSearch} isLoading={isLoading} />
+          {/* usa handleCategoryChange em vez de setCategory direto */}
+          <CategoryFilter active={category} onChange={handleCategoryChange} />
+          {/* usa handleSearch em vez de setSearch direto */}
+          <SearchBar onSearch={handleSearch} isLoading={isLoading} />
         </div>
 
         {articles.length > 0 && !isLoading && (
@@ -143,7 +165,7 @@ const Index = () => {
 
       <footer className="border-t border-border/30 py-6 mt-12">
         <div className="container mx-auto px-4 text-center text-xs text-muted-foreground font-mono">
-          Powered by Spaceflight News API & APITube · Built with React + TypeScript + Tailwind
+          Powered by Spaceflight News API & GNews · Built with React + TypeScript + Tailwind
         </div>
       </footer>
     </div>
